@@ -73,6 +73,7 @@ result_by_seat
 
 # 위 좌석을 가지는 여객기들은 모두 엔진 2개, Turbo-fan or Turbo-jet
 
+## 스케일링
 import numpy as np
 
 # 위 필터링을 거친 여객기 정보를 년도 구간에 따라 분류
@@ -140,6 +141,8 @@ grouped = (
 grouped
 
 # 구간에 따른 점수 설정 후 각 항공기마다 점수 부여
+import numpy as np
+
 size_weights = {
     '소형': 1,
     '중형': 2,
@@ -155,14 +158,18 @@ engine_weights = {
     'Turbo-fan':  2
 }
 
-df_f['score'] = (
-    df_f['size'].map(size_weights) *
-    df_f['period'].map(period_weights) *
+# 1) 점수 계산 (합산 후 제곱근)
+df_f['score'] = np.sqrt(
+    df_f['size'].map(size_weights) +
+    df_f['period'].map(period_weights) +
     df_f['engine'].map(engine_weights)
 )
 
-result = df_f[['tailnum','size','period','engine','score']]
-result1 = df_f[['tailnum','score']]
+# 2) 소수점 셋째 자리에서 절삭(truncate)
+df_f['score'] = np.trunc(df_f['score'] * 1000) / 1000
+
+result  = df_f[['tailnum', 'size', 'period', 'engine', 'score']]
+result1 = df_f[['tailnum', 'score']]
 
 print(result)
 print(result1)
@@ -264,7 +271,7 @@ for i, v in enumerate(engine_counts.values):
 plt.tight_layout()
 plt.show()
 
-# 2013.07.25 비행편 필터링 후 항공기에 따른 점수 표기 
+# 2013.07.25 항공편 필터링 후 항공기에 따른 점수 표기 
 # 후 내림차순 정렬 (점수가 결측치인 행 생략 + 중복 생략)
 # 462 
 import pandas as pd
@@ -292,8 +299,8 @@ merged = (
 
 print(merged)
 
-# 2013.07.25 비행하는 여객기 종류(73)
-print(merged.loc[merged['score'] == 12, 'tailnum'].unique().tolist())
+# 2013.07.25 비행하는 최고점 여객기 종류(73)
+print(merged.loc[merged['score'] == 2.645, 'tailnum'].unique().tolist())
 
 # 2013.07.25 비행하는 여객기 점수(막대그래프)
 
@@ -304,14 +311,19 @@ import numpy as np
 mpl.rcParams['font.family'] = 'Malgun Gothic'
 mpl.rcParams['axes.unicode_minus'] = False
 
+# Score별 고유 tailnum 수 집계
 score_counts = merged.groupby('score')['tailnum'] \
                      .nunique() \
                      .sort_index()
 
 max_score = score_counts.index.max()
 
+# 최고 점수 막대만 빨강, 나머지는 하늘색
 colors = ['red' if score == max_score else 'skyblue'
           for score in score_counts.index]
+
+# 막대 너비 정의
+bar_width = 0.6
 
 plt.figure(figsize=(8, 5))
 plt.bar(
@@ -325,6 +337,7 @@ plt.title('Score별 항공기 수')
 plt.xlabel('Score')
 plt.ylabel('항공기 수')
 
+# 값 레이블 추가
 for i, v in enumerate(score_counts.values):
     plt.text(i, v + max(score_counts)*0.01, str(v),
              ha='center', va='bottom')
@@ -333,88 +346,4 @@ plt.tight_layout()
 plt.show()
 
 #레이더 차트
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-import pandas as pd
-import nycflights13 as flights
 
-# (1) planes, flights 불러오기
-df_planes = flights.planes
-df_flights = flights.flights
-
-# (2) 기존 로직: 관심 좌석·엔진 조건으로 df_f 생성
-seat_list = [55, 95, 100, 140, 142, 149, 178, 179, 182, 200, 330]
-mask = (
-    (df_planes['engines'] == 2) &
-    (df_planes['engine'].isin(['Turbo-fan', 'Turbo-jet'])) &
-    (df_planes['seats'].isin(seat_list)) &
-    df_planes['year'].notnull()
-)
-df_f = df_planes.loc[mask].copy()
-bins_year   = [-np.inf, 1993, 2003, 2013]
-labels_year = ['1994년 이전', '1994~2003', '2004~2013']
-df_f['period'] = pd.cut(df_f['year'], bins=bins_year, labels=labels_year, right=True).astype(str)
-bins_seat   = [-np.inf, 150, 300, np.inf]
-labels_seat = ['소형', '중형', '대형']
-df_f['size'] = pd.cut(df_f['seats'], bins=bins_seat, labels=labels_seat, right=True).astype(str)
-size_weights   = {'소형': 1, '중형': 2, '대형': 3}
-period_weights = {'1994년 이전': 1, '1994~2003': 2, '2004~2013': 3}
-engine_weights = {'Turbo-jet': 1, 'Turbo-fan': 2}
-df_f['score'] = (
-    df_f['size'].map(size_weights) *
-    df_f['period'].map(period_weights) *
-    df_f['engine'].map(engine_weights)
-)
-
-# (3) 7/25 flights with score merge
-filtered = df_flights[
-    (df_flights['month'] == 7) &
-    (df_flights['day']   == 25) &
-    (df_flights['tailnum'].notnull())
-][['year','month','day','tailnum']]
-merged = (
-    pd.merge(filtered, df_f[['tailnum','score']], on='tailnum', how='left')
-    .dropna(subset=['score'])
-    .sort_values('score', ascending=False)
-    .drop_duplicates(subset='tailnum', keep='first')
-    .reset_index(drop=True)
-)
-
-# (4) 레이더 차트용 데이터 준비
-tailnums_12 = merged.loc[merged['score'] == 12, 'tailnum'].unique()
-df12 = df_f[df_f['tailnum'].isin(tailnums_12)].copy()
-df12['size_w']   = df12['size'].map(size_weights)
-df12['period_w'] = df12['period'].map(period_weights)
-df12['engine_w'] = df12['engine'].map(engine_weights)
-
-# 동일 가중치 조합별로 그룹화
-grouped = df12.groupby(['size_w','period_w','engine_w'])['tailnum'] \
-              .apply(list).reset_index()
-
-# 한글 폰트 설정 (맑은 고딕)
-mpl.rcParams['font.family'] = 'Malgun Gothic'
-mpl.rcParams['axes.unicode_minus'] = False
-
-labels = ['크기 가중치','제작년도 가중치','엔진 가중치']
-num_vars = len(labels)
-angles = np.linspace(0, 2*np.pi, num_vars, endpoint=False).tolist()
-angles += angles[:1]
-
-# 각 조합별 레이더 차트 그리기
-for _, row in grouped.iterrows():
-    values = [row['size_w'], row['period_w'], row['engine_w']]
-    values += values[:1]
-
-    fig, ax = plt.subplots(figsize=(6,6), subplot_kw=dict(polar=True))
-    ax.set_ylim(0,3)
-    ax.plot(angles, values, marker='o')
-    ax.fill(angles, values, alpha=0.25)
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels)
-    
-    title_tailnums = ', '.join(row['tailnum'])
-    ax.set_title(f"Score=12 ({title_tailnums})", y=1.1, fontsize=10)
-    
-    plt.tight_layout()
-    plt.show()
