@@ -1,0 +1,614 @@
+---
+title: "뉴욕 항공편 지연 요인<br>분석 보고서"
+format: 
+    revealjs:
+        theme: night
+        code-fold: true
+        echo: true
+jupyter: python3
+---
+## 뉴욕 공항 데이터 분석 프로젝트
+
+5조 : 박성준, 김현우, 안태경, 오윤서, 조영찬
+
+### Contents
+
+1.  날씨와 출발 지연 관계 분석
+
+2.  \~
+
+3.  \~
+
+4.  \~
+
+5.  여객기의 사양과 출발 지연 관계 분석
+
+## 1. 여객기의 사양과 출발 지연 관계 분석
+
+### **※ 단계적 접근 방법 ※**
+1. 엔진 수 & 엔진 종류별 여객기 수 세기
+2. 좌석 수에 따라 분류 후 해당 좌석을 가진   여객기의 수가 100대가 넘는 경우만 필터링
+3. 여객기의 제작년도를 구간을 나누어 분류
+4. 여객기의 좌석 수에 따라 구간을 나누어 분류
+
+## 엔진 수 & 엔진 종류별 여객기 수 세기 
+```{python}
+import pandas as pd
+from nycflights13 import planes   # nycflights13 패키지 사용
+
+# ① 데이터 준비
+grouped_tailnums = (
+    planes
+      .groupby(['engines', 'engine'], as_index=False)['tailnum']
+      .count()
+      .rename(columns={'tailnum': 'tailnum_count'})
+      .sort_values(['engines', 'engine'])
+)
+
+# ② Styler에 폰트·패딩 적용 → Styler 객체를 그대로 반환
+(
+    grouped_tailnums
+      .style
+      .set_table_styles([
+          {"selector": "th",
+           "props": [("font-size", "18pt"), ("padding", "6px 10px")]},
+          {"selector": "td",
+           "props": [("font-size", "18pt"), ("padding", "6px 10px")]}
+      ])
+      .hide(axis="index")      # 인덱스 숨기기(선택)
+)
+```
+
+## 좌석 수에 따라 분류 후 해당 좌석을 가진 여객기의 수가 100대가 넘는 경우만 필터링
+```{python}
+import pandas as pd
+from nycflights13 import planes as df_planes  # → df_planes 이름으로 고정
+
+# ① 좌석 수 목록
+selected_seats = [55, 95, 100, 140, 142, 149, 178, 179, 182, 200, 330]
+
+# ② 조건 필터링
+filtered = (
+    df_planes[
+        df_planes['seats'].isin(selected_seats) &
+        (df_planes['engines'] == 2) &
+        df_planes['engine'].isin(['Turbo-fan', 'Turbo-jet'])
+    ]
+)
+
+# ③ 좌석별 고유 tailnum 수 계산
+result_by_seat = (
+    filtered
+      .groupby('seats', as_index=False)['tailnum']
+      .nunique()
+      .rename(columns={'tailnum': 'plane_count'})
+      .sort_values('seats')
+)
+
+# ④ Styler로 폰트·패딩 확대 후 반환
+(
+    result_by_seat
+      .style
+      .set_table_styles([
+          {"selector": "th",
+           "props": [("font-size", "13pt"), ("padding", "4px 7px")]},
+          {"selector": "td",
+           "props": [("font-size", "13pt"), ("padding", "4px 7px")]}
+      ])
+      .hide(axis="index")   # 인덱스 열 숨기기(필요 없으면 제거)
+)
+```
+
+## 여객기의 제작년도를 구간을 나누어 분류
+```{python}
+import numpy as np
+
+seat_list = [55, 95, 100, 140, 142, 149, 178, 179, 182, 200, 330]
+
+filtered = df_planes[
+    (df_planes['engines'] == 2) &
+    (df_planes['engine'].isin(['Turbo-fan', 'Turbo-jet'])) &
+    (df_planes['seats'].isin(seat_list))
+].copy()
+
+bins = [-np.inf, 1993, 2003, 2013]
+labels = ['before_1994', '1994~2003', '2004~2013']
+
+filtered['period'] = pd.cut(
+    filtered['year'],
+    bins=bins,
+    labels=labels,
+    right=True
+)
+
+filtered = filtered.dropna(subset=['period'])
+
+period_counts = filtered.groupby('period')['tailnum'] \
+                         .nunique() \
+                         .sort_index()
+
+print(period_counts)
+```
+
+## 여객기의 좌석 수에 따라 구간을 나누어 분류
+```{python}
+import numpy as np
+import pandas as pd
+from IPython.display import HTML, display
+import nycflights13 as flights
+
+# ——— ① CSS 삽입: 폰트·패딩 조절 ———
+display(HTML("""
+<style>
+table.dataframe th, table.dataframe td {
+    font-size:8pt;
+    padding:2px 4px;
+}
+</style>
+"""))
+
+# ——— ② 필터링 및 전처리 ———
+df_planes = flights.planes
+seat_list = [55, 95, 100, 140, 142, 149, 178, 179, 182, 200, 330]
+
+mask = (
+    (df_planes['engines'] == 2) &
+    (df_planes['engine'].isin(['Turbo-fan', 'Turbo-jet'])) &
+    (df_planes['seats'].isin(seat_list)) &
+    df_planes['year'].notnull()
+)
+df_f = df_planes.loc[mask].copy()
+
+bins_year   = [-np.inf, 1993, 2003, 2013]
+labels_year = ['1994년 이전', '1994~2003', '2004~2013']
+df_f['period'] = pd.cut(df_f['year'], bins=bins_year, labels=labels_year)
+df_f = df_f[df_f['period'].notnull()].copy()
+df_f['period'] = df_f['period'].astype(str)
+
+bins_seat   = [-np.inf, 150, 300, np.inf]
+labels_seat = ['소형', '중형', '대형']
+df_f['size'] = pd.cut(df_f['seats'], bins=bins_seat, labels=labels_seat).astype(str)
+
+grouped = (
+    df_f
+    .groupby(['seats', 'size', 'period', 'engine'], as_index=False)
+    .agg(tailnum_count=('tailnum', 'nunique'))
+    .sort_values(['seats', 'size', 'period', 'engine'])
+)
+
+# ——— ③ 반으로 나눠서 두 열로 출력 ———
+n = len(grouped)
+half = (n + 1) // 2  # 홀수일 때 왼쪽에 하나 더
+left_df  = grouped.iloc[:half]
+right_df = grouped.iloc[half:]
+
+html = f"""
+<div style="display: flex; gap: 20px;">
+  <div style="flex: 1; overflow-x: auto;">
+    {left_df.to_html(index=False)}
+  </div>
+  <div style="flex: 1; overflow-x: auto;">
+    {right_df.to_html(index=False)}
+  </div>
+</div>
+"""
+display(HTML(html))
+```
+## 2. 각 기준치에 따른 여객기의 수
+```{python}
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+import numpy as np
+
+# 한글 폰트 설정 (맑은 고딕) & 기본 폰트 사이즈
+mpl.rcParams['font.family']        = 'Malgun Gothic'
+mpl.rcParams['axes.unicode_minus'] = False
+mpl.rcParams['font.size']          = 14
+mpl.rcParams['axes.titlesize']     = 18
+mpl.rcParams['axes.labelsize']     = 16
+mpl.rcParams['xtick.labelsize']    = 14
+mpl.rcParams['ytick.labelsize']    = 14
+
+# 1) 각 항목별 고유 tailnum 개수 계산
+size_counts   = df_f.groupby('size')['tailnum'].nunique().sort_index()
+period_counts = df_f.groupby('period')['tailnum'].nunique().sort_index()
+engine_counts = df_f.groupby('engine')['tailnum'].nunique().sort_index()
+
+# 2) 1행 3열 서브플롯 생성 (세로 길이 충분히 확보)
+fig, axes = plt.subplots(1, 3, figsize=(20, 7))
+
+# --- (1) 크기(size)별: 전부 skyblue ---
+axes[0].bar(size_counts.index, size_counts.values,
+            color='skyblue', alpha=0.9)
+axes[0].set_title('크기별 항공기 수')
+axes[0].set_xlabel('크기')
+axes[0].set_ylabel('항공기 수')
+axes[0].set_ylim(0, size_counts.max() * 1.2)
+for i, v in enumerate(size_counts.values):
+    axes[0].text(i, v + size_counts.max()*0.02, str(v),
+                 ha='center', va='bottom', fontsize=16)
+
+# --- (2) 제작년도 구간별: 전부 lightgreen ---
+axes[1].bar(period_counts.index.astype(str), period_counts.values,
+            color='lightgreen', alpha=0.9)
+axes[1].set_title('제작년도 구간별 항공기 수')
+axes[1].set_xlabel('제작년도 구간')
+axes[1].set_ylabel('항공기 수')
+axes[1].set_ylim(0, period_counts.max() * 1.2)
+for i, v in enumerate(period_counts.values):
+    axes[1].text(i, v + period_counts.max()*0.02, str(v),
+                 ha='center', va='bottom', fontsize=16)
+
+# --- (3) 엔진 종류별: 전부 salmon ---
+axes[2].bar(engine_counts.index, engine_counts.values,
+            color='salmon', alpha=0.9)
+axes[2].set_title('엔진 종류별 항공기 수')
+axes[2].set_xlabel('엔진 종류')
+axes[2].set_ylabel('항공기 수')
+axes[2].set_ylim(0, engine_counts.max() * 1.2)
+for i, v in enumerate(engine_counts.values):
+    axes[2].text(i, v + engine_counts.max()*0.02, str(v),
+                 ha='center', va='bottom', fontsize=16)
+
+plt.tight_layout()
+plt.show()
+```
+
+## 3. 여객기의 사양에 따른 점수 부여
+| 좌석 수 | 점수 |  제작 년도 | 점수 | 엔진 종류 |  점수 |
+| :---- | :---- | :---- | :---- | :---- | :---- |
+ | 소형 |    1  | 1994년 이전 |  1  | Turbo-jet  |  1  |
+ | 중형 |    2  | 1994~2003  |  2  | Turbo-fan  |  2  |
+ | 대형 |    3  | 2004~2013  |  3  |            |     |
+ 
+##
+```{python}
+import pandas as pd
+import numpy as np
+from IPython.display import display
+from nycflights13 import planes
+
+# 1) 기본 설정
+seat_list = [55, 95, 100, 140, 142, 149, 178, 179, 182, 200, 330]
+size_w   = {'소형': 1, '중형': 2, '대형': 3}
+period_w = {'1994년 이전': 1, '1994~2003': 2, '2004~2013': 3}
+engine_w = {'Turbo-jet': 1, 'Turbo-fan': 2}
+
+# 2) 필터링: 엔진 2개, 해당 엔진 종류, 관심 좌석, 제작년도 ≤2013
+df = planes
+df_f = df[
+    (df.engines == 2) &
+    df.engine.isin(engine_w) &
+    df.seats.isin(seat_list) &
+    (df.year <= 2013)
+].copy()
+
+# 3) 구간화: size, period
+df_f['size'] = pd.cut(
+    df_f.seats,
+    bins=[-np.inf, 150, 300, np.inf],
+    labels=list(size_w.keys()),
+    right=True
+).astype(str)
+
+df_f['period'] = pd.cut(
+    df_f.year,
+    bins=[-np.inf, 1993, 2003, 2013],
+    labels=list(period_w.keys()),
+    right=True
+).astype(str)
+
+# 4) 점수 계산 (곱셈)
+df_f['score'] = (
+    df_f['size'].map(size_w) *
+    df_f['period'].map(period_w) *
+    df_f['engine'].map(engine_w)
+)
+
+# 5) 결과 테이블 생성
+result = df_f[['tailnum', 'size', 'period', 'engine', 'score']]
+
+# 6) 상위 15개, 하위 15개 동시 출력
+display(result.head(15))
+display(result.tail(15))
+```
+
+## 3. 부여한 점수와 출발 지연의 상관관계
+```{python}
+import pandas as pd
+import numpy as np
+import nycflights13 as flights
+from nycflights13 import planes
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+
+# 0) planes 데이터로 tailnum별 score 계산
+seat_list   = [55, 95, 100, 140, 142, 149, 178, 179, 182, 200, 330]
+size_w      = {'소형': 1, '중형': 2, '대형': 3}
+period_w    = {'1994년 이전': 1, '1994~2003': 2, '2004~2013': 3}
+engine_w    = {'Turbo-jet': 1, 'Turbo-fan': 2}
+
+df_planes = planes
+
+df_f = df_planes[
+    (df_planes.engines == 2) &
+    df_planes.engine.isin(engine_w) &
+    df_planes.seats.isin(seat_list) &
+    (df_planes.year <= 2013)
+].copy()
+
+df_f['size'] = pd.cut(
+    df_f.seats,
+    bins=[-np.inf, 150, 300, np.inf],
+    labels=list(size_w.keys()),
+    right=True
+).astype(str)
+
+df_f['period'] = pd.cut(
+    df_f.year,
+    bins=[-np.inf, 1993, 2003, 2013],
+    labels=list(period_w.keys()),
+    right=True
+).astype(str)
+
+df_f['score'] = (
+    df_f['size'].map(size_w) *
+    df_f['period'].map(period_w) *
+    df_f['engine'].map(engine_w)
+)
+
+result_score = df_f[['tailnum', 'score']]
+
+# 1) flights 데이터에서 dep_delay와 tailnum이 non-null인 행만 추출
+df_flights = flights.flights
+flt = df_flights[
+    df_flights['dep_delay'].notna() &
+    df_flights['tailnum'].notna()
+][['dep_delay', 'tailnum']]
+
+# 2) tailnum별 score 병합 → score 결측치(NaN)인 행 제거
+final_df = (
+    flt
+    .merge(result_score, on='tailnum', how='left')
+    .dropna(subset=['score'])
+    .reset_index(drop=True)
+)
+
+# 한글 폰트 및 전반적 폰트 크기 설정
+mpl.rcParams['font.family']        = 'Malgun Gothic'
+mpl.rcParams['axes.unicode_minus'] = False
+mpl.rcParams['font.size']          = 24
+mpl.rcParams['axes.titlesize']     = 28
+mpl.rcParams['xtick.labelsize']    = 22
+mpl.rcParams['ytick.labelsize']    = 22
+
+# 3) subplot 세팅: 2행×4열
+scores = sorted(final_df['score'].unique())
+n_scores = len(scores)
+fig, axes = plt.subplots(2, 4, figsize=(40, 14))
+axes = axes.flatten()
+
+for ax, score in zip(axes, scores):
+    df_s = final_df[final_df['score'] == score]
+    delayed = (df_s['dep_delay'] >= 15).sum()
+    on_time = (df_s['dep_delay'] < 15).sum()
+    data = [on_time, delayed]
+    labels = [f"정시(<15분)\n{on_time}건", f"지연(≥15분)\n{delayed}건"]
+    colors = ['skyblue', 'salmon']
+    
+    # pie()는 labels만 지정할 경우 patches, texts 두 개를 반환
+    wedges, texts = ax.pie(
+        data,
+        labels=labels,
+        startangle=90,
+        counterclock=False,
+        colors=colors,
+        wedgeprops={'edgecolor': 'w'},
+        textprops={'fontsize': 22, 'fontfamily': 'Malgun Gothic'}
+    )
+    
+    if score == 3:
+        # 지연 라벨을 왼쪽으로 충분히 이동
+        x, y = texts[1].get_position()
+        texts[1].set_position((x - 0.30, y))
+    
+    ax.set_title(f"Score {score}", fontsize=28, fontweight='bold')
+    ax.axis('equal')
+
+# 빈 축 숨기기
+for ax in axes[n_scores:]:
+    ax.axis('off')
+
+plt.tight_layout()
+plt.show()
+```
+
+## 4. 각 기준치와 출발 지연의 상관관계
+### 좌석 수 (크기)
+### 제작년도
+### 엔진 종류
+
+## 좌석 수 (크기)
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from nycflights13 import planes, flights
+
+# 1) planes 필터링
+seat_list = [55, 95, 100, 140, 142, 149, 178, 179, 182, 200, 330]
+mask = (
+    (planes.engines == 2) &
+    planes.engine.isin(['Turbo-fan', 'Turbo-jet']) &
+    planes.seats.isin(seat_list)
+)
+df_sel = planes.loc[mask, ['tailnum', 'seats']].copy()
+
+# 좌석수 → size 구간화
+bins = [-np.inf, 150, 300, np.inf]
+labels = ['소형', '중형', '대형']
+df_sel['size'] = pd.cut(df_sel.seats, bins=bins, labels=labels)
+
+# 2) flights 전체에서 tailnum·dep_delay 추출 후 결측치 제거
+df_all = (
+    flights[['year','month','day','tailnum','dep_delay']]
+    .dropna(subset=['tailnum','dep_delay'])
+)
+
+# 관심 tailnum만 필터링 & size 병합
+df_merged = (
+    df_all[df_all.tailnum.isin(df_sel.tailnum)]
+    .merge(df_sel[['tailnum','size']], on='tailnum', how='left')
+)
+
+# 지연 vs 정시 분류
+df_merged['status'] = np.where(df_merged.dep_delay >= 15, '지연', '정시')
+
+# 3) size별 지연/정시 개수 집계
+counts = df_merged.groupby(['size','status']).size().unstack(fill_value=0)
+
+# 4) 파이 차트 그리기 (퍼센트 + 개수 표시)
+fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+for ax, size in zip(axes, labels):
+    data = counts.loc[size]
+    total = data.sum()
+    def fmt(pct):
+        count = int(pct * total / 100)
+        return f"{pct:.1f}%\n({count})"
+
+    ax.pie(
+        data,
+        labels=data.index,
+        autopct=fmt,
+        startangle=90
+    )
+    ax.set_title(f'{size} 항공기\n지연 vs 정시')
+
+plt.tight_layout()
+plt.show()
+```
+
+## 제작년도
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from nycflights13 import planes, flights
+
+# 1) planes 필터링 및 period 구분
+seat_list = [55, 95, 100, 140, 142, 149, 178, 179, 182, 200, 330]
+mask = (
+    (planes.engines == 2) &
+    planes.engine.isin(['Turbo-fan', 'Turbo-jet']) &
+    planes.seats.isin(seat_list)
+)
+df_sel = planes.loc[mask, ['tailnum', 'year']].copy()
+
+# year → period 구간화
+bins_year   = [-np.inf, 1993, 2003, 2013]
+labels_year = ['before_1994', '1994~2003', '2004~2013']
+df_sel['period'] = pd.cut(df_sel.year,
+                          bins=bins_year,
+                          labels=labels_year,
+                          right=True).astype(str)
+
+# 2) flights 전체에서 tailnum·dep_delay 추출 후 결측치 제거
+df_all = (
+    flights[['tailnum','dep_delay']]
+    .dropna(subset=['tailnum','dep_delay'])
+)
+
+# 관심 tailnum만 필터링 & period 병합
+df_merged = (
+    df_all[df_all.tailnum.isin(df_sel.tailnum)]
+    .merge(df_sel[['tailnum','period']], on='tailnum', how='left')
+    .dropna(subset=['period'])
+)
+
+# 3) 지연 vs 정시 분류
+df_merged['status'] = np.where(df_merged.dep_delay >= 15, '지연', '정시')
+
+# 4) period별 지연/정시 개수 집계
+counts = df_merged.groupby(['period','status']).size().unstack(fill_value=0)
+
+# 5) 파이 차트 그리기 (퍼센트 + 개수)
+fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+for ax, period in zip(axes, labels_year):
+    data = counts.loc[period]
+    total = data.sum()
+    def fmt(pct):
+        n = int(pct * total / 100)
+        return f"{pct:.1f}%\n({n})"
+    ax.pie(
+        data,
+        labels=data.index,
+        autopct=fmt,
+        startangle=90
+    )
+    ax.set_title(f'{period} 항공기\n지연 vs 정시')
+
+plt.tight_layout()
+plt.show()
+```
+
+## 엔진 종류
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from nycflights13 import planes, flights
+
+# 1) planes 필터링: 엔진 2개, Turbo-fan/jet, 관심 좌석
+seat_list = [55, 95, 100, 140, 142, 149, 178, 179, 182, 200, 330]
+df_sel = planes[
+    (planes.engines == 2) &
+    planes.engine.isin(['Turbo-fan', 'Turbo-jet']) &
+    planes.seats.isin(seat_list)
+][['tailnum','engine']].copy()
+
+# 2) flights에서 tailnum·dep_delay 추출 후 결측치 제거
+df_all = (
+    flights[['tailnum','dep_delay']]
+    .dropna(subset=['tailnum','dep_delay'])
+)
+
+# 3) 관심 tailnum만 필터링 & engine 병합
+df_merged = (
+    df_all[df_all.tailnum.isin(df_sel.tailnum)]
+    .merge(df_sel, on='tailnum', how='left')
+)
+
+# 4) 지연 vs 정시 분류
+df_merged['status'] = np.where(df_merged.dep_delay >= 15, '지연', '정시')
+
+# 5) engine별 지연/정시 개수 집계
+counts = df_merged.groupby(['engine','status']) \
+                  .size() \
+                  .unstack(fill_value=0)
+
+# 6) 파이 차트 그리기 (퍼센트 + 개수)
+fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+for ax, engine_type in zip(axes, ['Turbo-fan', 'Turbo-jet']):
+    data = counts.loc[engine_type]
+    total = data.sum()
+    def fmt(pct):
+        count = int(pct * total / 100)
+        return f"{pct:.1f}%\n({count})"
+    ax.pie(
+        data,
+        labels=data.index,
+        autopct=fmt,
+        startangle=90
+    )
+    ax.set_title(f'{engine_type} 항공기\n지연 vs 정시 비율')
+
+plt.tight_layout()
+plt.show()
+```
+
+## 결론
+좌석 수 (크기)에 따른 출발 지연률은 중형 여객기가 가장 낮다.
+제작년도에 따른 출발 지연도는 1994년 이전에 제작된 여객기가 가장 낮다. <br>
+엔진 종류에 따른 출발 지연률은 Turbo-Jet가 가장 낮다. <br>
+
+**즉, 출발 지연 시간은 여객기의 사양과 무관하다**
